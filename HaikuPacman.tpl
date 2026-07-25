@@ -12,8 +12,7 @@ copyrights {
 	"$(YEAR) ablyss"
 }
 provides {
-	$(TARGET) = $(VERSION)-1
-	libhdhomerun
+	$(TARGET) = $(VERSION)-1	
 }
 requires {
 	haiku
