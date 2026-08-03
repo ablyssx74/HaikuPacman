@@ -343,7 +343,9 @@ int main() {
             int pTargetX = pGridX + (pacman.dx * 4); int pTargetY = pGridY + (pacman.dy * 4);
             int iTargetX = pGridX - (pacman.dx * 2); int iTargetY = pGridY - (pacman.dy * 2);
             
-            int gClydeTileX = (int)clyde.x / TILE_SIZE; int gClydeTileY = (int)clyde.y / TILE_SIZE;
+            // Clyde Proximity AI Logic
+            int gClydeTileX = (int)floorf(clyde.x / TILE_SIZE); 
+            int gClydeTileY = (int)floorf(clyde.y / TILE_SIZE);
             float clydeDistance = std::hypot(gClydeTileX - pGridX, gClydeTileY - pGridY);
             int cTargetX = bTargetX; int cTargetY = bTargetY;
             if (clydeDistance < 8.0f) {
@@ -370,8 +372,9 @@ int main() {
                     }
                 }
 
-                int gTileX = (int)gh->x / TILE_SIZE; 
-                int gTileY = (int)gh->y / TILE_SIZE;
+                // Math fix: Use floorf to handle negative coordinates at edges safely
+                int gTileX = (int)floorf(gh->x / TILE_SIZE); 
+                int gTileY = (int)floorf(gh->y / TILE_SIZE);
                 bool gInLeftTunnel  = (gTileX < 1);
                 bool gInRightTunnel = (gTileX >= MAP_WIDTH - 1);
 
@@ -382,6 +385,7 @@ int main() {
                     }
                 } 
                 else {
+                    // Check if ghost is approaching an intersection tile closely
                     bool gAlignedX = ((int)gh->x % TILE_SIZE == 0);
                     bool gAlignedY = ((int)gh->y % TILE_SIZE == 0);
 
@@ -404,13 +408,26 @@ int main() {
                                 }
                             }
                         }
-                        if (bestDirIdx != -1) { gh->dx = dirsX[bestDirIdx]; gh->dy = dirsY[bestDirIdx]; }
+                        if (bestDirIdx != -1) { 
+                            gh->dx = dirsX[bestDirIdx]; 
+                            gh->dy = dirsY[bestDirIdx]; 
+                        }
                     }
                 }
 
+                // Apply safe physics steps
                 gh->x += gh->dx * gh->currentSpeed;
                 gh->y += gh->dy * gh->currentSpeed;
 
+                // Anti-Clip Alignment Correction: Keep ghosts snapped perfectly inside hallways
+                if (gh->dx != 0 && (int)gh->y % TILE_SIZE != 0) {
+                    gh->y = roundf(gh->y / TILE_SIZE) * TILE_SIZE;
+                }
+                if (gh->dy != 0 && (int)gh->x % TILE_SIZE != 0) {
+                    gh->x = roundf(gh->x / TILE_SIZE) * TILE_SIZE;
+                }
+
+                // Screen Teleport Wrap Triggers
                 if (gh->x < -TILE_SIZE) {
                     gh->x = SCREEN_WIDTH - TILE_SIZE;
                     gh->y = ((int)(gh->y + TILE_SIZE / 2) / TILE_SIZE) * TILE_SIZE;
@@ -419,6 +436,7 @@ int main() {
                     gh->y = ((int)(gh->y + TILE_SIZE / 2) / TILE_SIZE) * TILE_SIZE;
                 }
 
+                // Pacman and Ghost Collision check
                 if (std::abs(pacman.x - gh->x) < 10 && std::abs(pacman.y - gh->y) < 10) {
                     if (frightenedMode) {
                         gh->x = 13 * TILE_SIZE; gh->y = 10 * TILE_SIZE; gh->dx = 0; gh->dy = -1;
@@ -431,6 +449,7 @@ int main() {
                 }
             }
         }
+
         // --- RENDER LAYERS ---
         SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
         SDL_RenderClear(renderer);
