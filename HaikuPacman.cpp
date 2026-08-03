@@ -200,7 +200,11 @@ int main() {
     const char* localVersion = "v1.0.1"; 
     char updateCmd[1024];
     snprintf(updateCmd, sizeof(updateCmd),
+        #ifndef IS_HAIKU_32BIT
         "(REMOTE_V=$(curl -sL \"%s\" | tr -d '\\r\\n'); "
+        #else
+        "(REMOTE_V=$(curl-x86 -sL \"%s\" | tr -d '\\r\\n'); "
+        #endif
         "if [ ! -z \"$REMOTE_V\" ] && [ \"$REMOTE_V\" != \"%s\" ]; then "
         "notify --title \"Update Available\" --group \"HaikuPacman\" "
         "\"A newer version of HaikuPacman is available! ($REMOTE_V)\"; fi) &",

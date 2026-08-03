@@ -9,7 +9,7 @@ LIBS = -lSDL2 -lm
 TARGET = HaikuPacman
 VERSION = 1.0.1
 PACKAGE_DIR := build/package
-REVISION = 1
+REVISION = 2
 
 # Shared target architectures
 UNAME_M := $(shell uname -p)
@@ -18,11 +18,14 @@ ifeq ($(UNAME_M), x86)
     ARCH = x86_gcc2
     INCLUDE = -L/boot/system/lib/x86
     is32bit = _x86
+    DEFINES += -DIS_HAIKU_32BIT
 else ifeq ($(UNAME_M), x86_64)
     CXX = g++
     ARCH = x86_64
     INCLUDE = -L/boot/system/lib
 endif
+
+DEFINES := $(DEFINES)
 
 # Source files configuration
 SRCS = HaikuPacman.cpp
@@ -41,7 +44,7 @@ $(TARGET): $(OBJS)
 	
 # Compile C++ source files into binary object files
 %.o: %.cpp
-	$(CXX) $(CXXFLAGS) -c $< -o $@
+	$(CXX) $(DEFINES) $(CXXFLAGS) -c $< -o $@
 
 # Clean rule to wipe temporary object artifacts and target binaries
 clean:
