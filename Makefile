@@ -9,7 +9,7 @@ LIBS = -lSDL2 -lm
 TARGET = HaikuPacman
 VERSION = 1.0.1
 PACKAGE_DIR := build/package
-REVISION = 2
+REVISION = 1
 
 # Shared target architectures
 UNAME_M := $(shell uname -p)

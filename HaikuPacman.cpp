@@ -197,7 +197,7 @@ int main() {
     // Update Chcker
    	{
     const char* targetUrl = "https://raw.githubusercontent.com/ablyssx74/HaikuPacman/refs/heads/main/VERSION";
-    const char* localVersion = "v1.0.1"; 
+    const char* localVersion = "v1.0.2"; 
     char updateCmd[1024];
     snprintf(updateCmd, sizeof(updateCmd),
         #ifndef IS_HAIKU_32BIT
