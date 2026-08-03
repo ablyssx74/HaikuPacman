@@ -9,6 +9,7 @@ LIBS = -lSDL2 -lm
 TARGET = HaikuPacman
 VERSION = 1.0.1
 PACKAGE_DIR := build/package
+REVISION = 1
 
 # Shared target architectures
 UNAME_M := $(shell uname -p)
@@ -57,13 +58,13 @@ release: all
 	@[ -n "$(PACKAGE_DIR)" ] || { echo "PACKAGE_DIR is undefined"; exit 1; }
 	rm -rf "./$(PACKAGE_DIR)"
 	mkdir -p $(PACKAGE_DIR)
-	sed -e 's/$$(TARGET)/$(TARGET)/g' -e 's/$$(is32bit)/$(is32bit)/g' -e 's/$$(VERSION)/$(VERSION)/g' -e 's/$$(ARCH)/$(ARCH)/' -e 's/$$(YEAR)/$(shell date +%Y)/' $(TARGET).tpl > $(PACKAGE_DIR)/.PackageInfo
+	sed -e 's/$$(TARGET)/$(TARGET)/g' -e 's/$$(REVISION)/$(REVISION)/g'  -e 's/$$(is32bit)/$(is32bit)/g' -e 's/$$(VERSION)/$(VERSION)/g' -e 's/$$(ARCH)/$(ARCH)/' -e 's/$$(YEAR)/$(shell date +%Y)/' $(TARGET).tpl > $(PACKAGE_DIR)/.PackageInfo
 	mkdir -p $(PACKAGE_DIR)/apps
 	mkdir -p $(PACKAGE_DIR)/bin
 	mkdir -p $(PACKAGE_DIR)/data/deskbar/menu/Applications
 	cp $(TARGET) $(PACKAGE_DIR)/apps/$(TARGET)
 	ln -s /boot/system/apps/$(TARGET) $(PACKAGE_DIR)/bin/$(TARGET)
 	ln -s /boot/system/apps/$(TARGET) $(PACKAGE_DIR)/data/deskbar/menu/Applications/$(TARGET)
-	package create -C $(PACKAGE_DIR) $(TARGET)-$(VERSION)-1-$(ARCH).hpkg	
+	package create -C $(PACKAGE_DIR) $(TARGET)-$(VERSION)-$(REVISION)-$(ARCH).hpkg	
 
 

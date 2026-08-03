@@ -1,5 +1,5 @@
 name			$(TARGET)
-version			$(VERSION)-1
+version			$(VERSION)-$(REVISION)
 architecture	$(ARCH)
 summary 		"HaikuPacman"
 description 	"HaikuPacman - Pacman game"
@@ -12,7 +12,7 @@ copyrights {
 	"$(YEAR) ablyss"
 }
 provides {
-	$(TARGET) = $(VERSION)-1	
+	$(TARGET) = $(VERSION)-$(REVISION)
 }
 requires {
 	haiku
