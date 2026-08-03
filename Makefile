@@ -7,7 +7,7 @@ LIBS = -lSDL2 -lm
 
 # Target application binary name
 TARGET = HaikuPacman
-VERSION = 1.0.1
+VERSION = 1.0.2
 PACKAGE_DIR := build/package
 REVISION = 1
 
