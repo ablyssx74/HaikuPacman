@@ -3,11 +3,11 @@ CXX = g++
 CXXFLAGS = -Wall -Wextra -std=c++17
 
 # Library configuration
-LIBS = -lSDL2 -lm
+LIBS = -lSDL2 -lm -lcurl -lbe
 
 # Target application binary name
 TARGET = HaikuPacman
-VERSION = 1.0.2
+VERSION = 1.0.3
 PACKAGE_DIR := build/package
 REVISION = 1
 
