@@ -7,6 +7,10 @@
 #include <iostream>
 #include <cmath>
 #include <string>
+#include <curl/curl.h>
+#include <Notification.h>
+#include <String.h>
+#include <OS.h>
 
 const int TILE_SIZE = 16;  
 const int MAP_WIDTH = 28;  
@@ -173,7 +177,55 @@ void NextLevel(SDL_Window* window) {
     UpdateWindowTitle(window);
 }
 
+static size_t WriteCallback(void* contents, size_t size, size_t nmemb, void* userp) {
+    ((std::string*)userp)->append((char*)contents, size * nmemb);
+    return size * nmemb;
+}
+
+static int32 BackgroundUpdateChecker(void* data) {
+    (void)data;
+    const char* targetUrl = "https://raw.githubusercontent.com/ablyssx74/HaikuPacman/refs/heads/main/VERSION";
+    const char* localVersion = "v1.0.3";
+
+    CURL* curl = curl_easy_init();
+    if (!curl) return 0;
+
+    std::string response;
+    curl_easy_setopt(curl, CURLOPT_URL, targetUrl);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "HaikuPacman-UpdateChecker/1.0");
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_perform(curl);
+    // Intentionally not calling curl_easy_cleanup() here: on this machine's Haiku
+    // libcurl build, cleaning up a one-shot handle from a background thread
+    // reproducibly hangs/crashes after a successful curl_easy_perform(). Leaking
+    // one small handle per app launch is harmless since the process reclaims it
+    // at exit.
+
+    BString remoteVersion(response.c_str());
+    remoteVersion.Trim();
+
+    if (remoteVersion.Length() > 0 && remoteVersion != localVersion) {
+        BNotification notification(B_INFORMATION_NOTIFICATION);
+        notification.SetGroup("HaikuPacman");
+        notification.SetTitle("Update Available");
+        BString content;
+        content << "A newer version of HaikuPacman is available! (" << remoteVersion << ")";
+        notification.SetContent(content);
+        notification.Send();
+    }
+
+    return 0;
+}
+
 int main() {
+    // libcurl's global init is not thread-safe against other concurrently running
+    // threads, so do it explicitly up front to avoid an implicit lazy global init
+    // racing with the background update-checker thread started below.
+    curl_global_init(CURL_GLOBAL_DEFAULT);
+
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) < 0) return 1;
 
     SDL_AudioSpec want, have;
@@ -194,23 +246,11 @@ int main() {
                                           SCREEN_WIDTH, SCREEN_HEIGHT, SDL_WINDOW_SHOWN);
     SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
     
-    // Update Chcker
-   	{
-    const char* targetUrl = "https://raw.githubusercontent.com/ablyssx74/HaikuPacman/refs/heads/main/VERSION";
-    const char* localVersion = "v1.0.2"; 
-    char updateCmd[1024];
-    snprintf(updateCmd, sizeof(updateCmd),
-        #ifndef IS_HAIKU_32BIT
-        "(REMOTE_V=$(curl -sL \"%s\" | tr -d '\\r\\n'); "
-        #else
-        "(REMOTE_V=$(curl-x86 -sL \"%s\" | tr -d '\\r\\n'); "
-        #endif
-        "if [ ! -z \"$REMOTE_V\" ] && [ \"$REMOTE_V\" != \"%s\" ]; then "
-        "notify --title \"Update Available\" --group \"HaikuPacman\" "
-        "\"A newer version of HaikuPacman is available! ($REMOTE_V)\"; fi) &",
-        targetUrl, localVersion);	
-    system(updateCmd);
-   }
+    // Update Checker
+    {
+        thread_id updateThread = spawn_thread(BackgroundUpdateChecker, "haikupacman_update_checker", B_LOW_PRIORITY, nullptr);
+        if (updateThread >= 0) resume_thread(updateThread);
+    }
     
     
     ResetGame(window);
@@ -545,5 +585,6 @@ int main() {
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
     SDL_Quit();
+    curl_global_cleanup();
     return 0;
 }
