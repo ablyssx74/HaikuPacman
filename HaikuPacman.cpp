@@ -185,7 +185,7 @@ static size_t WriteCallback(void* contents, size_t size, size_t nmemb, void* use
 static int32 BackgroundUpdateChecker(void* data) {
     (void)data;
     const char* targetUrl = "https://raw.githubusercontent.com/ablyssx74/HaikuPacman/refs/heads/main/VERSION";
-    const char* localVersion = "v1.0.3";
+    const char* localVersion = "v1.0.4";
 
     CURL* curl = curl_easy_init();
     if (!curl) return 0;
@@ -198,11 +198,7 @@ static int32 BackgroundUpdateChecker(void* data) {
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_perform(curl);
-    // Intentionally not calling curl_easy_cleanup() here: on this machine's Haiku
-    // libcurl build, cleaning up a one-shot handle from a background thread
-    // reproducibly hangs/crashes after a successful curl_easy_perform(). Leaking
-    // one small handle per app launch is harmless since the process reclaims it
-    // at exit.
+    curl_easy_cleanup(curl);
 
     BString remoteVersion(response.c_str());
     remoteVersion.Trim();
