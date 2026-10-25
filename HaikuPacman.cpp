@@ -11,6 +11,7 @@
 #include <Notification.h>
 #include <String.h>
 #include <OS.h>
+#include <stdio.h>
 
 const int TILE_SIZE = 16;  
 const int MAP_WIDTH = 28;  
@@ -185,7 +186,8 @@ static size_t WriteCallback(void* contents, size_t size, size_t nmemb, void* use
 static int32 BackgroundUpdateChecker(void* data) {
     (void)data;
     const char* targetUrl = "https://raw.githubusercontent.com/ablyssx74/HaikuPacman/refs/heads/main/VERSION";
-    const char* localVersion = "v1.0.4";
+    // (the version comes from the VERSION file: the Makefile passes it in)
+    const char* localVersion = "v" APP_LOCAL_VERSION;
 
     CURL* curl = curl_easy_init();
     if (!curl) return 0;
@@ -203,7 +205,14 @@ static int32 BackgroundUpdateChecker(void* data) {
     BString remoteVersion(response.c_str());
     remoteVersion.Trim();
 
-    if (remoteVersion.Length() > 0 && remoteVersion != localVersion) {
+    // newer, not just different: "v1.0.4" is compared as the numbers 1, 0, 4
+    int32 curMajor = 0, curMinor = 0, curRevision = 0, remMajor = 0, remMinor = 0, remRevision = 0;
+    sscanf(localVersion, "%*[^0-9]%d.%d.%d", &curMajor, &curMinor, &curRevision);
+    sscanf(remoteVersion.String(), "%*[^0-9]%d.%d.%d", &remMajor, &remMinor, &remRevision);
+    const int32 currentFlattened = (curMajor * 10000) + (curMinor * 100) + curRevision;
+    const int32 remoteFlattened = (remMajor * 10000) + (remMinor * 100) + remRevision;
+
+    if (remoteVersion.Length() > 0 && remoteFlattened > currentFlattened) {
         BNotification notification(B_INFORMATION_NOTIFICATION);
         notification.SetGroup("HaikuPacman");
         notification.SetTitle("Update Available");

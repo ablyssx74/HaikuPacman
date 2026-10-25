@@ -7,7 +7,13 @@ LIBS = -lSDL2 -lm -lcurl -lbe
 
 # Target application binary name
 TARGET = HaikuPacman
-VERSION = 1.0.4
+# The one place a release changes is the VERSION file: the program (and its update check), the package and the
+# resource all take it from there.
+VERSION := $(shell sed -n 's/.*\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' VERSION | head -1)
+V_MAJOR := $(word 1,$(subst ., ,$(VERSION)))
+V_MIDDLE := $(word 2,$(subst ., ,$(VERSION)))
+V_MINOR := $(word 3,$(subst ., ,$(VERSION)))
+CXXFLAGS += -DAPP_LOCAL_VERSION=\"$(VERSION)\"
 PACKAGE_DIR := build/package
 REVISION = 1
 
@@ -38,17 +44,21 @@ all: $(TARGET)
 # Link the object files into the final executable binary
 $(TARGET): $(OBJS)
 	$(CXX) $(CXXFLAGS) -o $(TARGET) $(OBJS) $(LIBS)
-	rc -o $(TARGET).rsrc $(TARGET).rdef
+	sed -e 's/@V_MAJOR@/$(V_MAJOR)/' -e 's/@V_MIDDLE@/$(V_MIDDLE)/' -e 's/@V_MINOR@/$(V_MINOR)/' -e 's/@VERSION@/$(VERSION)/' $(TARGET).rdef > $(TARGET).version.rdef
+	rc -o $(TARGET).rsrc $(TARGET).version.rdef
 	xres -o $(TARGET) $(RSRCS)
 	mimeset -f $(TARGET)
 	
+# The version is compiled in: a new VERSION means a new build of the file that shows it
+HaikuPacman.o: VERSION
+
 # Compile C++ source files into binary object files
 %.o: %.cpp
 	$(CXX) $(DEFINES) $(CXXFLAGS) -c $< -o $@
 
 # Clean rule to wipe temporary object artifacts and target binaries
 clean:
-	rm -f *.o *.rsrc $(TARGET) *.hpkg
+	rm -f *.o *.rsrc *.version.rdef $(TARGET) *.hpkg
 	rm -rf build
 
 # Run rule to compile and instantly launch the app
