@@ -49,6 +49,7 @@ int maze[MAP_HEIGHT][MAP_WIDTH];
 
 int score = 0;
 int lives = 3; 
+int level = 1;
 int totalPellets = 0;
 int initialPelletCount = 0;
 Uint32 frameCounter = 0;
@@ -78,6 +79,7 @@ struct Player {
 
 struct Ghost {
     float x; float y; float baseSpeed; float currentSpeed;      
+    float moveBudget = 0.0f;                    // the part of a pixel that is owed to the ghost (see UpdateGhosts)
     int dx, dy;
     int colorR, colorG, colorB;
 } blinky, pinky, inky, clyde;
@@ -122,24 +124,33 @@ void SoftResetPositions() {
     pacman.x = 1 * TILE_SIZE; pacman.y = 1 * TILE_SIZE;
     pacman.dx = 0; pacman.dy = 0; pacman.next_dx = 0; pacman.next_dy = 0;
 
+    // (all four start in the ghost house, a row of free tiles: the row under it is wall)
     blinky.x = 13 * TILE_SIZE; blinky.y = 10 * TILE_SIZE; blinky.dx = 0; blinky.dy = -1;
     pinky.x = 14 * TILE_SIZE; pinky.y = 10 * TILE_SIZE; pinky.dx = 0; pinky.dy = -1;
-    inky.x = 13 * TILE_SIZE; inky.y = 11 * TILE_SIZE; inky.dx = 0; inky.dy = -1;
-    clyde.x = 14 * TILE_SIZE; clyde.y = 11 * TILE_SIZE; clyde.dx = 0; clyde.dy = -1;
+    inky.x = 12 * TILE_SIZE; inky.y = 10 * TILE_SIZE; inky.dx = 0; inky.dy = -1;
+    clyde.x = 15 * TILE_SIZE; clyde.y = 10 * TILE_SIZE; clyde.dx = 0; clyde.dy = -1;
+    blinky.moveBudget = pinky.moveBudget = inky.moveBudget = clyde.moveBudget = 0.0f;
     
     isDying = false; deathAnimFrame = 0;
 }
 
 void UpdateWindowTitle(SDL_Window* window) {
-    std::string titleStr = "Score: " + std::to_string(score) + "  |  Lives: " + std::to_string(lives);
+    std::string titleStr = "Score: " + std::to_string(score) + "  |  Lives: " + std::to_string(lives) + "  |  Level: " + std::to_string(level);
     if (frightenedMode) titleStr += "  [GHOSTS FRIGHTENED!]";
     if (cherrySpawned) titleStr += "  *CHERRY BONUS ACTIVE!*";
     if (gameOver) titleStr = "GAME OVER! Final Score: " + std::to_string(score) + " | Press SPACE to Restart";
     SDL_SetWindowTitle(window, titleStr.c_str());
 }
 
+// How fast the ghosts are: a little faster each level, but never near Pacman's 2 pixels a frame. What gets harder is how well they
+// chase (see GhostTier), not how fast.
+static float GhostBaseSpeed(int forLevel) {
+    const float speed = 1.0f + 0.05f * (forLevel - 1);
+    return speed > 1.3f ? 1.3f : speed;
+}
+
 void ResetGame(SDL_Window* window) {
-    score = 0; lives = 3; totalPellets = 0; gameOver = false; frightenedMode = false; frightenedTimer = 0; frameCounter = 0;
+    score = 0; lives = 3; level = 1; totalPellets = 0; gameOver = false; frightenedMode = false; frightenedTimer = 0; frameCounter = 0;
     cherrySpawned = false; cherryEaten = false;
     
     for(int r=0; r<MAP_HEIGHT; ++r) {
@@ -150,10 +161,10 @@ void ResetGame(SDL_Window* window) {
     }
     initialPelletCount = totalPellets;
 
-    blinky.baseSpeed = 1.0f; blinky.currentSpeed = 1.0f; blinky.colorR = 255; blinky.colorG = 0; blinky.colorB = 0;
-    pinky.baseSpeed = 1.0f; pinky.currentSpeed = 1.0f; pinky.colorR = 255; pinky.colorG = 182; pinky.colorB = 193;
-    inky.baseSpeed = 1.0f; inky.currentSpeed = 1.0f; inky.colorR = 0; inky.colorG = 255; inky.colorB = 255;
-    clyde.baseSpeed = 1.0f; clyde.currentSpeed = 1.0f; clyde.colorR = 255; clyde.colorG = 140; clyde.colorB = 0;
+    blinky.baseSpeed = GhostBaseSpeed(level); blinky.currentSpeed = blinky.baseSpeed; blinky.colorR = 255; blinky.colorG = 0; blinky.colorB = 0;
+    pinky.baseSpeed = GhostBaseSpeed(level); pinky.currentSpeed = pinky.baseSpeed; pinky.colorR = 255; pinky.colorG = 182; pinky.colorB = 193;
+    inky.baseSpeed = GhostBaseSpeed(level); inky.currentSpeed = inky.baseSpeed; inky.colorR = 0; inky.colorG = 255; inky.colorB = 255;
+    clyde.baseSpeed = GhostBaseSpeed(level); clyde.currentSpeed = clyde.baseSpeed; clyde.colorR = 255; clyde.colorG = 140; clyde.colorB = 0;
 
     SoftResetPositions();
     UpdateWindowTitle(window);
@@ -171,7 +182,8 @@ void NextLevel(SDL_Window* window) {
     }
     initialPelletCount = totalPellets;
 
-    blinky.baseSpeed += 0.25f; pinky.baseSpeed += 0.25f; inky.baseSpeed += 0.25f; clyde.baseSpeed += 0.25f;
+    level++;
+    blinky.baseSpeed = pinky.baseSpeed = inky.baseSpeed = clyde.baseSpeed = GhostBaseSpeed(level);
 
     SoftResetPositions();
     PlaySynthTone(587.33, 15000); 
@@ -223,6 +235,180 @@ static int32 BackgroundUpdateChecker(void* data) {
     }
 
     return 0;
+}
+
+// ---- The ghosts ----
+//
+// A ghost moves in whole pixels: its speed (pixels per frame, with a fraction) is paid out one pixel at a time, so it is exactly
+// on a tile now and then, and only there does it choose where to go next, among the tiles that are not walls. It cannot skip a
+// tile, so it cannot go through a wall, and it cannot leave the maze except through the tunnels at the sides.
+//
+// The level makes them smarter, not faster (a ghost stays much slower than Pacman). They always take the shortest way round the
+// walls to where they are going; what changes is how often they take a wrong turn and how well they work together:
+//   level 1   a wrong turn at one corner in five
+//   level 2   one in twelve
+//   level 3   none, and they work together: Inky aims past Pacman from Blinky's side, and Clyde keeps away only when Pacman is
+//             very close
+//   level 4+  Clyde never backs off either
+static const int HOUSE_ROW = 10, HOUSE_LEFT = 11, HOUSE_RIGHT = 16, DOOR_ROW = 9;
+
+static bool InGhostHouse(int tileX, int tileY) {
+    if (tileX < 0 || tileX >= MAP_WIDTH || tileY < 0 || tileY >= MAP_HEIGHT) return false;
+    return (tileY == HOUSE_ROW && tileX >= HOUSE_LEFT && tileX <= HOUSE_RIGHT) || (tileY == DOOR_ROW && maze[tileY][tileX] == 2);
+}
+
+static int GhostTier() { return level < 4 ? level : 4; }
+static int WrongTurnPercent(int tier) { return tier == 1 ? 20 : tier == 2 ? 8 : 0; }
+
+// How many steps it takes to get from every tile to the target, round the walls (through the tunnels too); -1: cannot be reached.
+static void BuildDistanceMap(int targetX, int targetY, int dist[MAP_HEIGHT][MAP_WIDTH]) {
+    static int queueX[MAP_WIDTH * MAP_HEIGHT], queueY[MAP_WIDTH * MAP_HEIGHT];
+    const int dirsX[] = {0, 0, -1, 1}, dirsY[] = {-1, 1, 0, 0};
+    for (int r = 0; r < MAP_HEIGHT; r++)
+        for (int c = 0; c < MAP_WIDTH; c++) dist[r][c] = -1;
+    int head = 0, tail = 0;
+    dist[targetY][targetX] = 0; queueX[tail] = targetX; queueY[tail] = targetY; tail++;
+    while (head < tail) {
+        const int x = queueX[head], y = queueY[head]; head++;
+        for (int i = 0; i < 4; i++) {
+            int nx = x + dirsX[i], ny = y + dirsY[i];
+            if (nx < 0) nx = MAP_WIDTH - 1; else if (nx >= MAP_WIDTH) nx = 0;
+            if (ny < 0 || ny >= MAP_HEIGHT) continue;
+            if (maze[ny][nx] == 1 || dist[ny][nx] >= 0) continue;
+            dist[ny][nx] = dist[y][x] + 1; queueX[tail] = nx; queueY[tail] = ny; tail++;
+        }
+    }
+}
+
+// A target in the maze: one that is outside it, or in a wall (four tiles ahead of Pacman is often), becomes the nearest free tile.
+static void ResolveTarget(int& targetX, int& targetY, int fallbackX, int fallbackY) {
+    if (fallbackX < 0) fallbackX = 0; else if (fallbackX >= MAP_WIDTH) fallbackX = MAP_WIDTH - 1;
+    if (fallbackY < 0) fallbackY = 0; else if (fallbackY >= MAP_HEIGHT) fallbackY = MAP_HEIGHT - 1;
+    if (targetX < 0) targetX = 0; else if (targetX >= MAP_WIDTH) targetX = MAP_WIDTH - 1;
+    if (targetY < 0) targetY = 0; else if (targetY >= MAP_HEIGHT) targetY = MAP_HEIGHT - 1;
+    if (maze[targetY][targetX] != 1) return;
+    float best = 1e9f; int bestX = fallbackX, bestY = fallbackY;
+    for (int dy = -6; dy <= 6; dy++) {
+        for (int dx = -6; dx <= 6; dx++) {
+            const int nx = targetX + dx, ny = targetY + dy;
+            if (nx < 0 || nx >= MAP_WIDTH || ny < 0 || ny >= MAP_HEIGHT || maze[ny][nx] == 1) continue;
+            const float d = std::hypot((float)dx, (float)dy);
+            if (d < best) { best = d; bestX = nx; bestY = ny; }
+        }
+    }
+    targetX = bestX; targetY = bestY;
+}
+
+// A ghost that is on a tile chooses its way: never into a wall, never back where it came from (unless it is in a dead end), and
+// never into the ghost house from outside. Frightened, it goes as far from Pacman as it can.
+static void ChooseGhostDirection(Ghost* gh, int tileX, int tileY, int targetX, int targetY, int pacTileX, int pacTileY) {
+    const int dirsX[] = {0, 0, -1, 1}, dirsY[] = {-1, 1, 0, 0};
+    const int tier = GhostTier();
+    const bool inHouse = InGhostHouse(tileX, tileY);
+    static int dist[MAP_HEIGHT][MAP_WIDTH];
+
+    if (inHouse) {
+        // out through the door, whatever else it has in mind
+        targetX = (tileX <= 13) ? 13 : 14; targetY = 8;
+    }
+    const bool flee = frightenedMode && !inHouse;
+    const bool useMap = !flee;
+    if (useMap) BuildDistanceMap(targetX, targetY, dist);
+    const bool wrongTurn = !flee && !inHouse && (rand() % 100) < WrongTurnPercent(tier);
+
+    int bestDir = -1, choices = 0;
+    for (int pass = 0; pass < 2 && bestDir < 0; pass++) {
+        float bestScore = flee ? -1.0f : 1e9f;
+        for (int i = 0; i < 4; i++) {
+            if (pass == 0 && dirsX[i] == -gh->dx && dirsY[i] == -gh->dy) continue;
+            int nx = tileX + dirsX[i]; const int ny = tileY + dirsY[i];
+            if (nx < 0) nx = MAP_WIDTH - 1; else if (nx >= MAP_WIDTH) nx = 0;
+            if (ny < 0 || ny >= MAP_HEIGHT || maze[ny][nx] == 1) continue;
+            if (maze[ny][nx] == 2 && !inHouse) continue;
+            float score;
+            if (flee) score = std::hypot((float)(nx - pacTileX), (float)(ny - pacTileY));
+            else { if (dist[ny][nx] < 0) continue; score = (float)dist[ny][nx]; }
+            if (wrongTurn) {
+                // a wrong turn: any way that is open, at random
+                if (rand() % ++choices == 0) bestDir = i;
+                continue;
+            }
+            if (flee ? (score > bestScore) : (score < bestScore)) { bestScore = score; bestDir = i; }
+        }
+    }
+    if (bestDir >= 0) { gh->dx = dirsX[bestDir]; gh->dy = dirsY[bestDir]; }
+    else { gh->dx = 0; gh->dy = 0; }
+}
+
+static void UpdateGhosts(SDL_Window* window, int pGridX, int pGridY) {
+    const int tier = GhostTier();
+    Ghost* ghostList[] = {&blinky, &pinky, &inky, &clyde};
+
+    // where each one is going
+    int targetXList[4], targetYList[4];
+    targetXList[0] = pGridX; targetYList[0] = pGridY;                                         // Blinky: Pacman
+    targetXList[1] = pGridX + pacman.dx * 4; targetYList[1] = pGridY + pacman.dy * 4;         // Pinky: ahead of Pacman
+    if (tier >= 3) {
+        // Inky: twice as far from Blinky as the tile two ahead of Pacman
+        const int aheadX = pGridX + pacman.dx * 2, aheadY = pGridY + pacman.dy * 2;
+        const int blinkyX = (int)floorf(blinky.x / TILE_SIZE), blinkyY = (int)floorf(blinky.y / TILE_SIZE);
+        targetXList[2] = aheadX + (aheadX - blinkyX); targetYList[2] = aheadY + (aheadY - blinkyY);
+    } else {
+        targetXList[2] = pGridX - pacman.dx * 2; targetYList[2] = pGridY - pacman.dy * 2;     // Inky: behind Pacman
+    }
+    const float clydeDistance = std::hypot(floorf(clyde.x / TILE_SIZE) - pGridX, floorf(clyde.y / TILE_SIZE) - pGridY);
+    const float clydeRetreat = (tier >= 4) ? 0.0f : (tier >= 3) ? 4.0f : 8.0f;
+    if (clydeDistance < clydeRetreat) { targetXList[3] = 0; targetYList[3] = MAP_HEIGHT - 1; }   // Clyde: the corner
+    else { targetXList[3] = pGridX; targetYList[3] = pGridY; }
+    for (int g = 0; g < 4; g++) ResolveTarget(targetXList[g], targetYList[g], pGridX, pGridY);
+
+    for (int g = 0; g < 4; g++) {
+        Ghost* gh = ghostList[g];
+
+        if (frightenedMode) {
+            gh->currentSpeed = gh->baseSpeed * 0.6f;
+        } else if (g == 0) {
+            // Blinky gets a little faster as the pellets run out
+            const float pelletRatio = (float)totalPellets / (float)initialPelletCount;
+            if (pelletRatio < 0.3f) gh->currentSpeed = gh->baseSpeed * 1.2f;
+            else if (pelletRatio < 0.6f) gh->currentSpeed = gh->baseSpeed * 1.1f;
+            else gh->currentSpeed = gh->baseSpeed;
+        } else {
+            gh->currentSpeed = gh->baseSpeed;
+        }
+
+        gh->moveBudget += gh->currentSpeed;
+        while (gh->moveBudget >= 1.0f) {
+            gh->moveBudget -= 1.0f;
+
+            // on a tile: choose the way (in the tunnels at the sides it just goes on)
+            if (((int)gh->x % TILE_SIZE == 0) && ((int)gh->y % TILE_SIZE == 0)) {
+                const int tileX = (int)gh->x / TILE_SIZE, tileY = (int)gh->y / TILE_SIZE;
+                if (tileX >= 1 && tileX < MAP_WIDTH - 1)
+                    ChooseGhostDirection(gh, tileX, tileY, targetXList[g], targetYList[g], pGridX, pGridY);
+                else if (gh->dx == 0)
+                    gh->dx = (tileX < 1) ? -1 : 1;
+            }
+
+            gh->x += gh->dx; gh->y += gh->dy;
+
+            // the tunnels: out at one side, in at the other
+            if (gh->x < -TILE_SIZE) gh->x = SCREEN_WIDTH - TILE_SIZE;
+            else if (gh->x >= SCREEN_WIDTH) gh->x = 0;
+        }
+
+        // Pacman and Ghost Collision check
+        if (std::abs(pacman.x - gh->x) < 10 && std::abs(pacman.y - gh->y) < 10) {
+            if (frightenedMode) {
+                gh->x = 13 * TILE_SIZE; gh->y = 10 * TILE_SIZE; gh->dx = 0; gh->dy = -1; gh->moveBudget = 0.0f;
+                score += 200;
+                PlaySynthTone(1000.0, 4000);
+                UpdateWindowTitle(window);
+            } else {
+                isDying = true; deathAnimFrame = 0;
+            }
+        }
+    }
 }
 
 int main() {
@@ -387,116 +573,7 @@ int main() {
                 }
             }
 
-            // --- GHOST ARTIFICIAL INTELLIGENCE & TRACKING ---
-            int bTargetX = pGridX; int bTargetY = pGridY;
-            int pTargetX = pGridX + (pacman.dx * 4); int pTargetY = pGridY + (pacman.dy * 4);
-            int iTargetX = pGridX - (pacman.dx * 2); int iTargetY = pGridY - (pacman.dy * 2);
-            
-            // Clyde Proximity AI Logic
-            int gClydeTileX = (int)floorf(clyde.x / TILE_SIZE); 
-            int gClydeTileY = (int)floorf(clyde.y / TILE_SIZE);
-            float clydeDistance = std::hypot(gClydeTileX - pGridX, gClydeTileY - pGridY);
-            int cTargetX = bTargetX; int cTargetY = bTargetY;
-            if (clydeDistance < 8.0f) {
-                cTargetX = 0; cTargetY = MAP_HEIGHT - 1; 
-            }
-
-            Ghost* ghostList[] = {&blinky, &pinky, &inky, &clyde};
-            int targetXList[] = {bTargetX, pTargetX, iTargetX, cTargetX};
-            int targetYList[] = {bTargetY, pTargetY, iTargetY, cTargetY};
-
-            for(int g = 0; g < 4; g++) {
-                Ghost* gh = ghostList[g];
-
-                if (frightenedMode) {
-                    gh->currentSpeed = gh->baseSpeed * 0.6f;
-                } else {
-                    if (g == 0) {
-                        float pelletRatio = (float)totalPellets / (float)initialPelletCount;
-                        if (pelletRatio < 0.3f) gh->currentSpeed = gh->baseSpeed * 1.6f;
-                        else if (pelletRatio < 0.6f) gh->currentSpeed = gh->baseSpeed * 1.3f;
-                        else gh->currentSpeed = gh->baseSpeed;
-                    } else {
-                        gh->currentSpeed = gh->baseSpeed;
-                    }
-                }
-
-                // Math fix: Use floorf to handle negative coordinates at edges safely
-                int gTileX = (int)floorf(gh->x / TILE_SIZE); 
-                int gTileY = (int)floorf(gh->y / TILE_SIZE);
-                bool gInLeftTunnel  = (gTileX < 1);
-                bool gInRightTunnel = (gTileX >= MAP_WIDTH - 1);
-
-                if (gInLeftTunnel || gInRightTunnel) {
-                    if (gh->dx == 0) {
-                        gh->dx = (gInLeftTunnel) ? -1 : 1; 
-                        gh->dy = 0;
-                    }
-                } 
-                else {
-                    // Check if ghost is approaching an intersection tile closely
-                    bool gAlignedX = ((int)gh->x % TILE_SIZE == 0);
-                    bool gAlignedY = ((int)gh->y % TILE_SIZE == 0);
-
-                    if (gAlignedX && gAlignedY) {
-                        int dirsX[] = {0, 0, -1, 1}; int dirsY[] = {-1, 1, 0, 0};
-                        int bestDirIdx = -1; float extremeDist = frightenedMode ? -1.0f : 999999.0f;
-
-                        for (int i = 0; i < 4; i++) {
-                            if (dirsX[i] == -gh->dx && dirsY[i] == -gh->dy) continue; 
-                            int testTileX = gTileX + dirsX[i]; int testTileY = gTileY + dirsY[i];
-
-                            if (testTileX >= 0 && testTileX < MAP_WIDTH && testTileY >= 0 && testTileY < MAP_HEIGHT) {
-                                if (maze[testTileY][testTileX] != 1) { 
-                                    float dist = std::hypot(testTileX - targetXList[g], testTileY - targetYList[g]);
-                                    if (frightenedMode) {
-                                        if (dist > extremeDist) { extremeDist = dist; bestDirIdx = i; }
-                                    } else {
-                                        if (dist < extremeDist) { extremeDist = dist; bestDirIdx = i; }
-                                    }
-                                }
-                            }
-                        }
-                        if (bestDirIdx != -1) { 
-                            gh->dx = dirsX[bestDirIdx]; 
-                            gh->dy = dirsY[bestDirIdx]; 
-                        }
-                    }
-                }
-
-                // Apply safe physics steps
-                gh->x += gh->dx * gh->currentSpeed;
-                gh->y += gh->dy * gh->currentSpeed;
-
-                // Anti-Clip Alignment Correction: Keep ghosts snapped perfectly inside hallways
-                if (gh->dx != 0 && (int)gh->y % TILE_SIZE != 0) {
-                    gh->y = roundf(gh->y / TILE_SIZE) * TILE_SIZE;
-                }
-                if (gh->dy != 0 && (int)gh->x % TILE_SIZE != 0) {
-                    gh->x = roundf(gh->x / TILE_SIZE) * TILE_SIZE;
-                }
-
-                // Screen Teleport Wrap Triggers
-                if (gh->x < -TILE_SIZE) {
-                    gh->x = SCREEN_WIDTH - TILE_SIZE;
-                    gh->y = ((int)(gh->y + TILE_SIZE / 2) / TILE_SIZE) * TILE_SIZE;
-                } else if (gh->x >= SCREEN_WIDTH) {
-                    gh->x = 0;
-                    gh->y = ((int)(gh->y + TILE_SIZE / 2) / TILE_SIZE) * TILE_SIZE;
-                }
-
-                // Pacman and Ghost Collision check
-                if (std::abs(pacman.x - gh->x) < 10 && std::abs(pacman.y - gh->y) < 10) {
-                    if (frightenedMode) {
-                        gh->x = 13 * TILE_SIZE; gh->y = 10 * TILE_SIZE; gh->dx = 0; gh->dy = -1;
-                        score += 200;
-                        PlaySynthTone(1000.0, 4000);
-                        UpdateWindowTitle(window);
-                    } else {
-                        isDying = true; deathAnimFrame = 0;
-                    }
-                }
-            }
+            UpdateGhosts(window, pGridX, pGridY);
         }
 
         // --- RENDER LAYERS ---

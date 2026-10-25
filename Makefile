@@ -58,14 +58,29 @@ HaikuPacman.o: VERSION
 
 # Clean rule to wipe temporary object artifacts and target binaries
 clean:
-	rm -f *.o *.rsrc *.version.rdef $(TARGET) *.hpkg
+	rm -f *.o *.rsrc *.version.rdef $(TARGET) *.hpkg ghost_test
 	rm -rf build
+
+# The ghosts' tests (they use the game's own code): make test
+# Away from Haiku the Haiku headers are stood in for (tests/stubs); on Haiku the real ones are used (the stand-ins would
+# replace the system's own BString inside libbe).
+ifeq ($(shell uname -s), Haiku)
+TEST_FLAGS =
+TEST_LIBS = -lSDL2 -lm -lcurl -lbe
+else
+TEST_FLAGS = -Itests/stubs
+TEST_LIBS = -lSDL2 -lm -lcurl
+endif
+
+test: tests/ghost_test.cpp HaikuPacman.cpp
+	$(CXX) $(CXXFLAGS) $(TEST_FLAGS) -o ghost_test tests/ghost_test.cpp $(TEST_LIBS)
+	SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy ./ghost_test
 
 # Run rule to compile and instantly launch the app
 run: all
 	./$(TARGET)
 
-.PHONY: all clean run
+.PHONY: all clean run test
 
 release: all
 	@[ -n "$(PACKAGE_DIR)" ] || { echo "PACKAGE_DIR is undefined"; exit 1; }
